@@ -1,0 +1,18 @@
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN     "cancellationDate" TIMESTAMP(3),
+ADD COLUMN     "cancellationReason" TEXT,
+ADD COLUMN     "cancelledBy" TEXT,
+ADD COLUMN     "carrier" TEXT,
+ADD COLUMN     "deliveredDate" TIMESTAMP(3),
+ADD COLUMN     "deliveredTime" TEXT,
+ADD COLUMN     "deliveryDelayReason" TEXT,
+ADD COLUMN     "deliveryFailureReason" TEXT,
+ADD COLUMN     "estimatedDelivery" TEXT,
+ADD COLUMN     "newDeliveryEstimate" TEXT,
+ADD COLUMN     "nextDeliveryAttempt" TEXT,
+ADD COLUMN     "outForDeliveryTime" TEXT,
+ADD COLUMN     "refundAmount" DOUBLE PRECISION,
+ADD COLUMN     "refundInitiated" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "refundMessage" TEXT,
+ADD COLUMN     "refundProcessedAt" TIMESTAMP(3),
+ADD COLUMN     "trackingNumber" TEXT;

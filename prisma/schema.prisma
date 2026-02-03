@@ -1,0 +1,768 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/**
+ * ENUMS
+ */
+enum AdminRole {
+  STAFF
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PACKED
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+  PAYMENT_FAILED
+}
+
+enum ActivityType {
+  // PRODUCT
+  PRODUCT_CREATED
+  PRODUCT_UPDATED
+  PRODUCT_ARCHIVED
+  PRODUCT_RESTORED
+  PRODUCT_HARD_DELETED
+  PRODUCT_IMAGES_DELETED
+  PRODUCT_VARIANTS_UPDATED
+
+  // CATEGORY
+  CATEGORY_CREATED
+  CATEGORY_UPDATED
+  CATEGORY_DELETED
+
+  // CURRENCY
+  CURRENCY_RATE_CREATED
+  CURRENCY_RATE_UPDATED
+
+  // CUSTOMER
+  CUSTOMER_DEACTIVATED
+  CUSTOMER_REACTIVATED
+
+  // ORDERS
+  ORDER_STATUS_UPDATED
+  ORDER_SHIPPING_UPDATED
+
+  // AUTH / ADMIN
+  ADMIN_CREATED
+  ADMIN_ROLE_ASSIGNED
+  ADMIN_LOGGED_IN
+
+  // HOMEPAGE / CONTENT
+  HERO_UPDATED
+  BANNER_UPDATED
+  WHY_CHOOSE_US_UPDATED
+
+  // FEEDBACK / TESTIMONIALS
+  FEEDBACK_REVIEWED
+  FEEDBACK_APPROVED
+  FEEDBACK_REJECTED
+  FEEDBACK_PROMOTED_TO_TESTIMONIAL
+  TESTIMONIAL_UPDATED
+  TESTIMONIAL_DEACTIVATED
+}
+
+enum Currency {
+  USD
+  EUR
+  GBP
+  NGN
+  ZAR
+}
+
+enum ProductContentType {
+  DESCRIPTION
+  SHIPPING
+  GENERAL
+}
+
+enum CancellationSource {
+  CUSTOMER
+  ADMIN
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  REFUND_INITIATED
+}
+
+enum FeedbackStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROMOTED
+}
+
+enum CartStatus {
+  ACTIVE
+  LOCKED
+  CLEARED
+}
+
+model AdminUser {
+  id                   String               @id @default(uuid())
+  email                String               @unique
+  password             String
+  name                 String?
+  role                 AdminRole            @default(STAFF)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  activityLogs         ActivityLog[]
+  orderStatusHistories OrderStatusHistory[]
+  customerFeedbacks    CustomerFeedback[]
+}
+
+/**
+ * Customers + Addresses
+ */
+model Customer {
+  id       String  @id @default(uuid())
+  email    String  @unique
+  password String?
+  name     String?
+  phone    String?
+
+  authProvider  String    @default("local")
+  emailVerified Boolean   @default(false)
+  lastLoginAt   DateTime?
+  resetToken    String?
+  resetTokenExp DateTime?
+  deletedAt     DateTime?
+
+  addresses CustomerAddress[]
+  orders    Order[]
+  carts     Cart[]
+  wishlist  Wishlist?
+  sessions  CustomerSession[]
+
+  createdAt               DateTime                 @default(now())
+  passwordResetTokens     PasswordResetToken[]
+  paymentMethods          CustomerPaymentMethod[]
+  emailVerificationTokens EmailVerificationToken[]
+}
+
+model EmailVerificationToken {
+  id         String   @id @default(cuid())
+  customerId String
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+}
+
+model CustomerSession {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  refreshToken String  @unique
+  userAgent    String?
+  ipAddress    String?
+
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([customerId])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model CustomerAddress {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  fullName    String
+  phone       String
+  street      String
+  city        String
+  state       String?
+  postalCode  String?
+  country     String
+  isDefault   Boolean  @default(false)
+  addressHash String
+  createdAt   DateTime @default(now())
+  orders      Order[]
+
+  @@unique([customerId, addressHash])
+}
+
+model Category {
+  id   String @id @default(uuid())
+  slug String @unique
+
+  name_en        String
+  name_fr        String?
+  name_es        String?
+  name_zu        String?
+  imageUrl       String?
+  description_en String?
+  description_fr String?
+  description_es String?
+  description_zu String?
+
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id            String       @id @default(uuid())
+  categoryId    String?
+  category      Category?    @relation(fields: [categoryId], references: [id])
+  productType   ProductType? @relation(fields: [productTypeId], references: [id])
+  productTypeId String?
+  // Base pricing
+  priceUSD      Float
+
+  // Translated fields
+  title_en String
+  title_fr String?
+  title_es String?
+  title_zu String?
+
+  description_en String
+  description_fr String?
+  description_es String?
+  description_zu String?
+
+  status ProductStatus @default(ACTIVE)
+
+  // Relations
+  images     ProductImage[]
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  cartItems              CartItem[]
+  wishlistItems          WishlistItem[]
+  productContentSections ProductContentSection[]
+}
+
+model ProductContentSection {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  type       ProductContentType
+  title      String?
+  content_en String
+  content_fr String?
+  content_es String?
+  content_zu String?
+
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productId, type])
+  @@index([productId])
+}
+
+model ProductImage {
+  id        String        @id @default(uuid())
+  productId String
+  product   Product       @relation(fields: [productId], references: [id])
+  url       String
+  colorId   String?
+  color     ProductColor? @relation(fields: [colorId], references: [id])
+  isPrimary Boolean       @default(false)
+  order     Int           @default(0)
+
+  @@index([productId, order])
+  @@index([colorId])
+}
+
+model ProductVariant {
+  id                  String        @id @default(uuid())
+  productId           String
+  product             Product       @relation(fields: [productId], references: [id])
+  colorId             String?
+  color               ProductColor? @relation(fields: [colorId], references: [id])
+  sizeId              String?
+  size                ProductSize?  @relation(fields: [sizeId], references: [id])
+  stock               Int           @default(0)
+  sku                 String?       @unique
+  cartItems           CartItem[]
+  orderItems          OrderItem[]
+  lowStockAlertSent   Boolean       @default(false)
+  outOfStockAlertSent Boolean       @default(false)
+
+  @@unique([productId, colorId, sizeId])
+}
+
+model ProductColor {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  label     String
+  hex       String
+  createdAt DateTime @default(now())
+
+  variants ProductVariant[]
+  images   ProductImage[]
+}
+
+model ProductSize {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  label     String
+  order     Int
+  createdAt DateTime @default(now())
+
+  variants ProductVariant[]
+}
+
+model ProductType {
+  id       String  @id @default(uuid())
+  key      String  @unique
+  label_en String
+  label_fr String?
+  label_es String?
+  label_zu String?
+
+  isActive Boolean @default(true)
+  order    Int     @default(0)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id              String    @id @default(uuid())
+  orderNumber     String    @unique
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id])
+  customerNote    String?
+  cartId          String?
+  cart            Cart?     @relation(fields: [cartId], references: [id])
+  email           String
+  phone           String?
+  attachedByEmail Boolean   @default(false)
+
+  shippingAddressId String?
+  shippingAddress   CustomerAddress? @relation(fields: [shippingAddressId], references: [id])
+
+  shippingFullName String
+  shippingPhone    String
+  shippingStreet   String
+  shippingCity     String
+  shippingState    String?
+  shippingPostal   String?
+  shippingCountry  String
+
+  subtotalAmount Float @default(0)
+  shippingAmount Float @default(0)
+
+  currency          String
+  totalAmount       Float  @default(0)
+  totalAmountUSD    Float  @default(0)
+  subtotalAmountUSD Float  @default(0)
+  shippingAmountUSD Float  @default(0)
+  exchangeRate      Float  @default(1)
+  exchangeRateToUSD Float  @default(1)
+
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  txRef           String?
+  flwId           String?
+  flwStatus       String?
+  paymentProvider String        @default("flutterwave")
+
+  items          OrderItem[]
+  statusHistory  OrderStatusHistory[]
+  orderTimelines OrderTimeline[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  paidAt    DateTime?
+
+  receiptUrl String?
+
+  // ─────────────────────────────
+  // SHIPPING / DELIVERY
+  // ─────────────────────────────
+  carrier               String?
+  trackingNumber        String?
+  estimatedDelivery     String? // e.g., "Jan 7–10"
+  outForDeliveryTime    String?
+  deliveredDate         DateTime?
+  deliveredTime         String?
+  deliveryFailureReason String?
+  nextDeliveryAttempt   DateTime?
+  deliveryDelayReason   String?
+  newDeliveryEstimate   String?
+
+  // ─────────────────────────────
+  // CANCELLATION + REFUND
+  // ─────────────────────────────
+  cancelledBy        CancellationSource?
+  cancellationReason String?
+  cancelledAt        DateTime?
+  refundInitiated    Boolean             @default(false)
+  refundAmount       Float?
+  refundCurrency     Currency?
+  refundMessage      String?
+
+  refundedAt           DateTime?
+  refundIdempotencyKey String?   @unique
+  refundProviderId     String?
+  refundStatus         String?
+  refundInitiatedAt    DateTime?
+
+  customerFeedbacks CustomerFeedback[]
+  paymentMethodId   String?
+  paymentMethod     CustomerPaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+}
+
+model OrderItem {
+  id         String          @id @default(uuid())
+  orderId    String
+  order      Order           @relation(fields: [orderId], references: [id])
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id])
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  quantity   Int
+  priceUSD   Float
+  priceLocal Float
+  imageUrl   String?
+}
+
+model OrderTimeline {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id])
+  status    OrderStatus
+  note      String?
+  source    String?
+  createdAt DateTime    @default(now())
+}
+
+model OrderStatusHistory {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  status  OrderStatus
+  message String?
+
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CurrencyRate {
+  id        String   @id @default(uuid())
+  currency  Currency @unique
+  rate      Float
+  updatedAt DateTime @default(now())
+}
+
+model ContentPage {
+  id         String   @id @default(uuid())
+  slug       String   @unique
+  content_en String
+  content_fr String?
+  content_es String?
+  content_zu String?
+  updatedAt  DateTime @updatedAt
+}
+
+model Cart {
+  id         String     @id @default(uuid())
+  deviceId   String?    @unique
+  customerId String?    @unique
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+  status     CartStatus @default(ACTIVE)
+  items      CartItem[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  orders     Order[]
+}
+
+model CartItem {
+  id     String @id @default(uuid())
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id])
+
+  productId String
+  variantId String
+  quantity  Int
+
+  product Product        @relation(fields: [productId], references: [id])
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+}
+
+model Wishlist {
+  id         String    @id @default(uuid())
+  deviceId   String?   @unique
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  items WishlistItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([customerId])
+}
+
+model WishlistItem {
+  id         String   @id @default(uuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([wishlistId, productId])
+}
+
+model ActivityLog {
+  id String @id @default(uuid())
+
+  actorId String?
+  actor   AdminUser? @relation(fields: [actorId], references: [id])
+
+  actorEmail String
+  actorName  String?
+
+  action       ActivityType
+  entity       String
+  entityId     String
+  activityType ActivityType
+  message      String
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([entity])
+  @@index([activityType])
+  @@index([entityId])
+  @@index([createdAt])
+}
+
+model Banner {
+  id String @id @default(uuid())
+
+  // ── Title ─────────────────────────────
+  title_en String?
+  title_fr String?
+  title_es String?
+  title_zu String?
+
+  // ── Description ───────────────────────
+  description_en String?
+  description_fr String?
+  description_es String?
+  description_zu String?
+
+  // ── CTA ───────────────────────────────
+  ctaText_en String?
+  ctaText_fr String?
+  ctaText_es String?
+  ctaText_zu String?
+
+  ctaLink String?
+
+  // ── Media ─────────────────────────────
+  imageUrl String
+
+  createdAt DateTime @default(now())
+}
+
+model HeroSection {
+  id String @id @default(uuid())
+
+  headline_en String
+  headline_fr String?
+  headline_es String?
+  headline_zu String?
+
+  subheadline_en String?
+  subheadline_fr String?
+  subheadline_es String?
+  subheadline_zu String?
+
+  imageUrl String
+
+  ctaText_en String?
+  ctaText_fr String?
+  ctaText_es String?
+  ctaText_zu String?
+
+  ctaLink  String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Testimonial {
+  id String @id @default(uuid())
+
+  feedbackId String?           @unique
+  feedback   CustomerFeedback? @relation(fields: [feedbackId], references: [id])
+
+  customerName String
+  avatarUrl    String?
+
+  role_en String?
+  role_fr String?
+  role_es String?
+  role_zu String?
+
+  quote_en String
+  quote_fr String?
+  quote_es String?
+  quote_zu String?
+
+  productTitle_en String?
+  productTitle_fr String?
+  productTitle_es String?
+  productTitle_zu String?
+
+  rating Int?
+
+  isActive Boolean @default(true)
+  priority Int     @default(0)
+
+  createdAt DateTime @default(now())
+}
+
+model WhyChooseUs {
+  id String @id @default(uuid())
+
+  title_en String
+  title_fr String?
+  title_es String?
+  title_zu String?
+
+  description_en String
+  description_fr String?
+  description_es String?
+  description_zu String?
+
+  icon     String?
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+}
+
+model CustomerFeedback {
+  id String @id @default(uuid())
+
+  orderId    String
+  customerId String?
+
+  language String // "en" | "fr" | "es" | "zu"
+  rating   Int?
+  message  String
+
+  status   FeedbackStatus @default(PENDING)
+  isPublic Boolean        @default(false)
+
+  reviewedByAdminId String?
+  reviewedByAdmin   AdminUser? @relation(fields: [reviewedByAdminId], references: [id])
+  reviewedAt        DateTime?
+
+  createdAt DateTime @default(now())
+
+  order       Order        @relation(fields: [orderId], references: [id])
+  testimonial Testimonial?
+
+  @@index([status])
+  @@index([language])
+}
+
+model CustomerPaymentMethod {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  provider   String   @default("flutterwave")
+
+  providerRef String? @unique
+
+  token    String? @unique
+  brand    String?
+  last4    String?
+  expMonth Int?
+  expYear  Int?
+
+  billingName    String?
+  billingLine1   String?
+  billingCity    String?
+  billingPostal  String?
+  billingCountry String?
+
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
+
+  @@unique([customerId, providerRef])
+  @@index([customerId])
+}
+
+model SearchHistory {
+  id String @id @default(cuid())
+
+  customerId String?
+  deviceId   String?
+
+  query     String
+  createdAt DateTime @default(now())
+
+  @@unique([customerId, query])
+  @@unique([deviceId, query])
+  @@index([customerId])
+  @@index([deviceId])
+}
