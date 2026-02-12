@@ -1,2 +1,0 @@
--- AlterTable
-ALTER TABLE "Order" ADD COLUMN     "exchangeRateToUSD" DOUBLE PRECISION NOT NULL DEFAULT 1;
