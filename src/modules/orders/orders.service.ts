@@ -45,7 +45,8 @@ export class OrdersService {
   async checkoutFromCart(
     cartId: string,
     dto: CreateOrderDto,
-    customerId?: string,
+    customerId: string | null,
+    deviceId?: string,
   ) {
     const cart = await this.prisma.cart.findUnique({
       where: { id: cartId },
@@ -62,27 +63,38 @@ export class OrdersService {
     /* =============================
      CART VALIDATION
   ============================== */
-    if (!cart) {
-      throw new BadRequestException('Cart not found');
-    }
-
-    if (!cart.items.length) {
-      throw new BadRequestException('Cart is empty');
-    }
-
+    if (!cart) throw new BadRequestException('Cart not found');
+    if (!cart.items.length) throw new BadRequestException('Cart is empty');
     if (cart.status === 'LOCKED') {
       throw new BadRequestException('This cart is already being checked out');
     }
 
+    /**
+     * Ownership enforcement:
+     * - If authenticated: cart must belong to the customer (or be unassigned and will be claimed elsewhere)
+     * - If guest: cart must be guest cart AND deviceId must match
+     */
     if (customerId) {
       if (cart.customerId && cart.customerId !== customerId) {
         throw new BadRequestException('Cart does not belong to this customer');
       }
     } else {
+      // Guest checkout
       if (cart.customerId) {
         throw new BadRequestException(
           'This cart requires authentication. Please sign in to continue',
         );
+      }
+
+      if (!deviceId) {
+        throw new BadRequestException(
+          'Device ID is required for guest checkout',
+        );
+      }
+
+      // 🔥 This is the real security check you were missing
+      if (!cart.deviceId || cart.deviceId !== deviceId) {
+        throw new BadRequestException('Cart does not belong to this device');
       }
     }
 
@@ -90,16 +102,12 @@ export class OrdersService {
      1. CURRENCY (BACKEND TRUTH)
   ============================== */
     const currency = dto.currency?.toUpperCase() as Currency;
-    if (!currency) {
-      throw new BadRequestException('Currency is required');
-    }
+    if (!currency) throw new BadRequestException('Currency is required');
 
     const rateRecord =
       currency === 'USD'
         ? { currency: 'USD', rate: 1 }
-        : await this.prisma.currencyRate.findUnique({
-            where: { currency },
-          });
+        : await this.prisma.currencyRate.findUnique({ where: { currency } });
 
     if (!rateRecord) {
       throw new BadRequestException(
@@ -115,9 +123,7 @@ export class OrdersService {
     let orderNumber: string;
     while (true) {
       orderNumber = generateOrderNumber();
-      const exists = await this.prisma.order.count({
-        where: { orderNumber },
-      });
+      const exists = await this.prisma.order.count({ where: { orderNumber } });
       if (!exists) break;
     }
 
@@ -128,15 +134,12 @@ export class OrdersService {
       (sum, item) => sum + item.quantity * item.product.priceUSD,
       0,
     );
-
-    // Convert USD → local currency
     const subtotalLocal = subtotalUSD * exchangeRate;
 
     /* =============================
      4. SHIPPING (BACKEND-ONLY)
   ============================== */
     let shippingUSD: number;
-
     switch (dto.shippingCountry) {
       case 'United States':
         shippingUSD = SHIPPING_USD_BY_COUNTRY['United States'];
@@ -158,10 +161,6 @@ export class OrdersService {
     }
 
     const shippingLocal = shippingUSD * exchangeRate;
-
-    /* =============================
-     5. FINAL TOTAL
-  ============================== */
     const totalLocal = subtotalLocal + shippingLocal;
 
     /* =============================
@@ -209,11 +208,27 @@ export class OrdersService {
         shippingAddressId = address.id;
       }
 
-      /* -------- CREATE ORDER -------- */
+      // ✅ FIX: Prisma expects create: [] here
+      const timelineEntries = [
+        {
+          status: OrderStatus.PENDING,
+          note: 'Order created',
+        },
+        ...(dto.customerNote
+          ? [
+              {
+                status: OrderStatus.PENDING,
+                note: `Customer note: ${dto.customerNote}`,
+                source: 'customer' as const,
+              },
+            ]
+          : []),
+      ];
+
       const order = await tx.order.create({
         data: {
           orderNumber,
-          customerId,
+          customerId: customerId ?? undefined,
           cartId: cart.id,
 
           email: dto.email,
@@ -248,6 +263,7 @@ export class OrdersService {
             create: cart.items.map((item) => {
               const product = item.product;
               const variant = item.variant;
+
               const image =
                 product.images.find(
                   (img) => img.colorId === variant?.colorId && img.isPrimary,
@@ -270,19 +286,7 @@ export class OrdersService {
           },
 
           orderTimelines: {
-            create: {
-              status: OrderStatus.PENDING,
-              note: 'Order created',
-            },
-            ...(dto.customerNote
-              ? [
-                  {
-                    status: OrderStatus.PENDING,
-                    note: `Customer note: ${dto.customerNote}`,
-                    source: 'customer',
-                  },
-                ]
-              : []),
+            create: timelineEntries,
           },
 
           statusHistory: {
@@ -841,7 +845,7 @@ export class OrdersService {
     return order;
   }
   async customerCancelOrder(
-    deviceId: string,
+    deviceId: string | null,
     customerId: string | null,
     orderId: string,
   ) {
@@ -852,13 +856,13 @@ export class OrdersService {
 
     if (!order) throw new NotFoundException('Order not found');
 
-    // Validate ownership
     const isAuthenticatedCustomer =
-      customerId && order.customerId === customerId;
+      !!customerId && order.customerId === customerId;
 
     const isGuestCustomer =
       !customerId &&
       order.customerId === null &&
+      !!deviceId &&
       order.cart?.deviceId === deviceId;
 
     if (!isAuthenticatedCustomer && !isGuestCustomer) {
@@ -867,11 +871,11 @@ export class OrdersService {
       );
     }
 
-    // Validate status
     const cancellableStatuses: OrderStatus[] = [
       OrderStatus.PENDING,
       OrderStatus.CONFIRMED,
     ];
+
     if (!cancellableStatuses.includes(order.status)) {
       throw new BadRequestException('Order cannot be cancelled at this stage');
     }

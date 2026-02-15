@@ -10,7 +10,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { OrderStatus, AdminUser } from '@prisma/client';
+import { AdminUser, OrderStatus } from '@prisma/client';
 
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -19,6 +19,7 @@ import { UpdateOrderShippingDto } from './dto/update-order-shipping.dto';
 
 import { OptionalCustomerAuthGuard } from '../auth/guards/optional-customer-auth-guard';
 import { CustomerAuthGuard } from '../auth/guards/customer-auth.guard';
+import { DeviceGuard } from '../auth/guards/device.guard';
 
 import { AdminAuthGuard } from '../admin/guards/admin-auth.guard';
 import { RolesGuard } from '../admin/guards/roles.guard';
@@ -26,7 +27,6 @@ import { AdminOnly } from '../admin/decorators/roles.decorator';
 
 import { Customer } from 'src/common/decorators/customer.decorator';
 import { DeviceId } from 'src/common/decorators/device-id.decorator';
-import { DeviceGuard } from '../auth/guards/device.guard';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -37,18 +37,24 @@ export class OrdersController {
      CREATE ORDER (PUBLIC)
   ====================================================== */
   @Post('checkout/:cartId')
-  @UseGuards(OptionalCustomerAuthGuard)
+  @UseGuards(OptionalCustomerAuthGuard, DeviceGuard)
   @ApiOperation({ summary: 'Checkout cart and create order' })
   checkout(
     @Param('cartId') cartId: string,
     @Body() dto: CreateOrderDto,
-    @Customer() customer?: { id: string },
+    @Customer() customer?: { id: string } | null,
+    @DeviceId() deviceId?: string,
   ) {
-    return this.orders.checkoutFromCart(cartId, dto, customer?.id);
+    return this.orders.checkoutFromCart(
+      cartId,
+      dto,
+      customer?.id ?? null,
+      deviceId,
+    );
   }
 
   /* ======================================================
-     PUBLIC ORDER TRACKING
+     PUBLIC ORDER TRACKING (NO AUTH)
   ====================================================== */
   @Get('track/:orderNumber')
   @ApiOperation({ summary: 'Track order by public order number' })
@@ -57,7 +63,7 @@ export class OrdersController {
   }
 
   /* ======================================================
-     CUSTOMER — LIST MY ORDERS
+     CUSTOMER — LIST MY ORDERS (AUTH)
   ====================================================== */
   @Get('my')
   @UseGuards(CustomerAuthGuard)
@@ -68,7 +74,8 @@ export class OrdersController {
   }
 
   /* ======================================================
-     CUSTOMER — SINGLE ORDER BY ID (owned)
+     CUSTOMER/GUEST — SINGLE ORDER BY ID
+     (uses customerId OR deviceId; service enforces ownership)
   ====================================================== */
   @Get('my/:id')
   @UseGuards(OptionalCustomerAuthGuard, DeviceGuard)
@@ -76,7 +83,7 @@ export class OrdersController {
   customerOrder(
     @Param('id') id: string,
     @Customer() customer?: { id: string } | null,
-    @DeviceId() deviceId?: string | null,
+    @DeviceId() deviceId?: string,
   ) {
     return this.orders.customerGetOrder(
       customer?.id ?? null,
@@ -86,18 +93,31 @@ export class OrdersController {
   }
 
   /* ======================================================
+     CUSTOMER — SINGLE ORDER BY ORDER NUMBER (AUTH)
+     IMPORTANT: must come BEFORE admin @Get(':id') to avoid collision.
+  ====================================================== */
+  @Get(':orderNumber')
+  @UseGuards(CustomerAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get single customer order by orderNumber' })
+  customerOrderByNumber(@Param('orderNumber') orderNumber: string) {
+    return this.orders.customerGetOrderByNumber(orderNumber);
+  }
+
+  /* ======================================================
      CANCEL (customer or guest)
+     IMPORTANT: do NOT accept deviceId from body; use @DeviceId()
   ====================================================== */
   @Post(':id/cancel')
-  @UseGuards(OptionalCustomerAuthGuard)
+  @UseGuards(OptionalCustomerAuthGuard, DeviceGuard)
   @ApiOperation({ summary: 'Cancel an order (customer or guest)' })
   cancelOrder(
     @Param('id') orderId: string,
-    @Body('deviceId') deviceId: string,
-    @Customer() customer?: { id: string },
+    @Customer() customer?: { id: string } | null,
+    @DeviceId() deviceId?: string,
   ) {
     return this.orders.customerCancelOrder(
-      deviceId,
+      deviceId ?? null,
       customer?.id ?? null,
       orderId,
     );
@@ -116,8 +136,9 @@ export class OrdersController {
   }
 
   /* ======================================================
-     ADMIN — SINGLE ORDER (UUID ONLY)
-     IMPORTANT: this prevents collision with /:orderNumber
+     ADMIN — SINGLE ORDER (UUID)
+     NOTE: still collides by shape, but admin list route is a different path.
+     The real collision was with customerOrderByNumber, fixed by ordering.
   ====================================================== */
   @Get(':id')
   @UseGuards(AdminAuthGuard, RolesGuard)
@@ -126,18 +147,6 @@ export class OrdersController {
   @ApiOperation({ summary: 'Get single order (admin)' })
   adminGetOrder(@Param('id') id: string) {
     return this.orders.adminGetOrder(id);
-  }
-
-  /* ======================================================
-     CUSTOMER — SINGLE ORDER BY ORDER NUMBER
-     NOTE: kept exactly as your original URL: /orders/:orderNumber
-  ====================================================== */
-  @Get(':orderNumber')
-  @UseGuards(CustomerAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get single customer order by orderNumber' })
-  customerOrderByNumber(@Param('orderNumber') orderNumber: string) {
-    return this.orders.customerGetOrderByNumber(orderNumber);
   }
 
   /* ======================================================
