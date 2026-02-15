@@ -46,7 +46,7 @@ async function bootstrap() {
       'deviceId',
       'x-device-id',
     ],
-    exposedHeaders: ['Set-Cookie'],
+    exposedHeaders: ['Set-Cookie', 'x-device-id'],
   });
 
   // Global validation pipe
