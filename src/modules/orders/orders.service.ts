@@ -743,13 +743,15 @@ export class OrdersService {
     });
   }
 
-  async customerGetOrder(customerId: string, orderId: string) {
-    const order = await this.prisma.order.findFirst({
-      where: {
-        id: orderId,
-        customerId,
-      },
+  async customerGetOrder(
+    customerId: string | null,
+    deviceId: string | null,
+    orderId: string,
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
       include: {
+        cart: true,
         items: {
           include: {
             product: {
@@ -774,6 +776,32 @@ export class OrdersService {
 
     if (!order) {
       throw new NotFoundException('Order not found');
+    }
+
+    // If customerId is provided, enforce ownership via customerId
+    if (customerId) {
+      if (order.customerId !== customerId) {
+        throw new BadRequestException(
+          'You are not authorized to view this order',
+        );
+      }
+      return order;
+    }
+
+    // Otherwise enforce guest ownership via deviceId
+    if (!deviceId) {
+      throw new BadRequestException(
+        'Device ID is required for guest order access',
+      );
+    }
+
+    const guestOwnsOrder =
+      order.customerId === null && order.cart?.deviceId === deviceId;
+
+    if (!guestOwnsOrder) {
+      throw new BadRequestException(
+        'You are not authorized to view this order',
+      );
     }
 
     return order;

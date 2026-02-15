@@ -25,6 +25,8 @@ import { RolesGuard } from '../admin/guards/roles.guard';
 import { AdminOnly } from '../admin/decorators/roles.decorator';
 
 import { Customer } from 'src/common/decorators/customer.decorator';
+import { DeviceId } from 'src/common/decorators/device-id.decorator';
+import { DeviceGuard } from '../auth/guards/device.guard';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -69,11 +71,18 @@ export class OrdersController {
      CUSTOMER — SINGLE ORDER BY ID (owned)
   ====================================================== */
   @Get('my/:id')
-  @UseGuards(CustomerAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get single customer order' })
-  customerOrder(@Param('id') id: string, @Customer() customer: { id: string }) {
-    return this.orders.customerGetOrder(customer.id, id);
+  @UseGuards(OptionalCustomerAuthGuard, DeviceGuard)
+  @ApiOperation({ summary: 'Get single order (customer or guest)' })
+  customerOrder(
+    @Param('id') id: string,
+    @Customer() customer?: { id: string } | null,
+    @DeviceId() deviceId?: string | null,
+  ) {
+    return this.orders.customerGetOrder(
+      customer?.id ?? null,
+      deviceId ?? null,
+      id,
+    );
   }
 
   /* ======================================================
