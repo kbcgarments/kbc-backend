@@ -527,59 +527,37 @@ export class AdminHomepageService {
     const monthStart = startOfCurrentMonthUTC();
     const monthEnd = endOfCurrentMonthUTC();
 
-    // WEEK RANGE: last 7 days
     const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const weekEnd = new Date();
 
     const [
-      /* =============================
-        PRODUCTS & CATEGORIES
-    ============================== */
       totalProducts,
       totalCategories,
 
-      /* =============================
-        ORDERS
-    ============================== */
       totalOrders,
       ordersToday,
       pendingOrders,
       deliveredOrders,
       cancelledOrders,
 
-      /* =============================
-        CUSTOMERS
-    ============================== */
       totalCustomers,
 
-      /* =============================
-        REVENUE
-    ============================== */
       totalRevenueAgg,
       revenueTodayAgg,
       revenueThisWeekAgg,
       revenueThisMonthAgg,
 
-      /* =============================
-        FEEDBACK
-    ============================== */
       pendingFeedback,
       approvedFeedback,
       promotedFeedback,
 
-      /* =============================
-        TESTIMONIALS
-    ============================== */
       totalTestimonials,
       activeTestimonials,
 
-      /* =============================
-        HOMEPAGE CONTENT
-    ============================== */
       activeHeroSections,
       activeBanners,
       activeWhyChooseUsItems,
-    ] = await Promise.all([
+    ] = await this.prisma.$transaction([
       // PRODUCT COUNT
       this.prisma.product.count(),
 
@@ -588,53 +566,41 @@ export class AdminHomepageService {
 
       // ORDER COUNTS
       this.prisma.order.count(),
-
       this.prisma.order.count({
         where: { createdAt: { gte: todayStart, lte: todayEnd } },
       }),
+      this.prisma.order.count({ where: { status: OrderStatus.PENDING } }),
+      this.prisma.order.count({ where: { status: OrderStatus.DELIVERED } }),
+      this.prisma.order.count({ where: { status: OrderStatus.CANCELLED } }),
 
-      this.prisma.order.count({
-        where: { status: 'PENDING' },
-      }),
-
-      this.prisma.order.count({
-        where: { status: 'DELIVERED' },
-      }),
-
-      this.prisma.order.count({
-        where: { status: 'CANCELLED' },
-      }),
-
-      // TOTAL CUSTOMERS (REAL USERS, NOT ADMIN USERS)
+      // CUSTOMERS
       this.prisma.customer.count(),
 
-      // TOTAL REVENUE
-      this.prisma.order.aggregate({
-        _sum: { totalAmountUSD: true },
-      }),
-
-      // TODAY REVENUE
+      // REVENUE
+      this.prisma.order.aggregate({ _sum: { totalAmountUSD: true } }),
       this.prisma.order.aggregate({
         where: { createdAt: { gte: todayStart, lte: todayEnd } },
         _sum: { totalAmountUSD: true },
       }),
-
-      // WEEK REVENUE
       this.prisma.order.aggregate({
         where: { createdAt: { gte: weekStart, lte: weekEnd } },
         _sum: { totalAmountUSD: true },
       }),
-
-      // MONTH REVENUE
       this.prisma.order.aggregate({
         where: { createdAt: { gte: monthStart, lte: monthEnd } },
         _sum: { totalAmountUSD: true },
       }),
 
       // FEEDBACK
-      this.prisma.customerFeedback.count({ where: { status: 'PENDING' } }),
-      this.prisma.customerFeedback.count({ where: { status: 'APPROVED' } }),
-      this.prisma.customerFeedback.count({ where: { status: 'PROMOTED' } }),
+      this.prisma.customerFeedback.count({
+        where: { status: FeedbackStatus.PENDING },
+      }),
+      this.prisma.customerFeedback.count({
+        where: { status: FeedbackStatus.APPROVED },
+      }),
+      this.prisma.customerFeedback.count({
+        where: { status: FeedbackStatus.PROMOTED },
+      }),
 
       // TESTIMONIALS
       this.prisma.testimonial.count(),
@@ -647,36 +613,29 @@ export class AdminHomepageService {
     ]);
 
     return {
-      /* PRODUCTS */
       totalProducts,
       totalCategories,
 
-      /* ORDERS */
       totalOrders,
       ordersToday,
       pendingOrders,
       deliveredOrders,
       cancelledOrders,
 
-      /* CUSTOMERS */
       totalCustomers,
 
-      /* REVENUE */
-      totalRevenueUSD: totalRevenueAgg._sum.totalAmountUSD || 0,
-      revenueTodayUSD: revenueTodayAgg._sum.totalAmountUSD || 0,
-      revenueThisWeekUSD: revenueThisWeekAgg._sum.totalAmountUSD || 0,
-      revenueThisMonthUSD: revenueThisMonthAgg._sum.totalAmountUSD || 0,
+      totalRevenueUSD: totalRevenueAgg._sum.totalAmountUSD ?? 0,
+      revenueTodayUSD: revenueTodayAgg._sum.totalAmountUSD ?? 0,
+      revenueThisWeekUSD: revenueThisWeekAgg._sum.totalAmountUSD ?? 0,
+      revenueThisMonthUSD: revenueThisMonthAgg._sum.totalAmountUSD ?? 0,
 
-      /* FEEDBACK */
       pendingFeedback,
       approvedFeedback,
       promotedFeedback,
 
-      /* TESTIMONIALS */
       totalTestimonials,
       activeTestimonials,
 
-      /* HOMEPAGE CONTENT */
       activeHeroSections,
       activeBanners,
       activeWhyChooseUsItems,
