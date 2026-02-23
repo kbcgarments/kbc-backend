@@ -12,10 +12,7 @@ async function bootstrap() {
   const port = Number(process.env.PORT) || 4000;
   app.use(bodyParser.json());
   app.use(cookieParser());
-  console.log(
-    'DB URL:',
-    process.env.DATABASE_URL?.replace(/:\/\/.*@/, '://***@'),
-  );
+
   // Swagger config
   const config = new DocumentBuilder()
     .setTitle('KBC E-Commerce API')
